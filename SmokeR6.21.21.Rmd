@@ -1,0 +1,1137 @@
+---
+title: 'Using Principal Component Analysis for Exploration: Sensory
+  Analysis of Product Treatments on Smoke Exposed Grapes'
+author: "Daniel A. Dycus"
+output:
+  html_notebook: default
+  pdf_document: default
+  indent: yes
+  html_document:
+    df_print: paged
+---
+
+This is the notebook for the sensory data from wines made from a study on smoke exposed grapes in 2021. This data was acquired by performing over 120 micro-fermentations in accordance with the micro-fermentation protocol from the Australian Wine Research Institute (AWRI). 32 different wines were made from 4 different varietals from 4 different American Viticulture Areas (AVAs) inside North America. Each region represents an area impacted by the fires on the Western Coast of North America in the Fall of 2020. The triplicated fermentations represent controls and treatments from products supplied by Laffort USA. Quantitative Analysis of compounds related to the sensory character of wines was performed by Excell Laboratories in Bordeaux France using liquid-liquid extraction, acid-mediated hydrolysis, and Gas Chromatography / Mass Spectrometry (GC/MS). Then, in February 2021, we constructed a virtual sensory platform where 288 winemakers, researchers, and wine industry professionals gathered using a web portal. During this virtual wine tasting each panelist rated the intensity of fifteen wine sensory attributes of various treatment sets. This information was gathered and a mainframe was constructed by Daniel A. Dycus, Technical Manager for Laffort in North America. This notebook is constructed using a blend of programming environments including R and Python. The following items below are addressed in this notebook. The code and dataframes are not included in this portion of the study but are hosted and available upon request.   
+     
+* Introduction: 
+   * Brief Description of the Data Set and a Summary of the Attributes
+   * Initial Plan for Data Exploration
+* Data Cleaning & Feature Engineering:
+   * Removal of NA Values
+   * Interpolation using Data Interpolation Empirical Orthogonal Functions (DINEOF)
+   * Nearest Neighbors 
+* Key Findings and Insights:
+* Hypothesis One (Shapiro-Wilk)
+   * Null: The data is normally distributed
+   * Alternative: The data is not normally distributed
+* Hypothesis Two (Non-Parametric MANOVA)
+   * Null: Adding products does not change the sensory perception of the wine
+   * Alternative: Adding products changes the sensory perception of the wine
+* Permutational Analysis of Variance
+* Principal Component Analysis using Singular Value Decomposition
+* Data Visualization Requests
+* Conclusions 
+
+
+```{r Install Packages If Required, message=FALSE, warning=FALSE, ECHO=FALSE, include=FALSE}
+if (!require("factoextra")) {
+   install.packages("factoextra")
+   library(factoextra)
+}
+if (!require("FactoMineR")) {
+   install.packages("FactoMineR")
+   library(FactoMineR)
+}
+if (!require("tidyverse")) {
+   install.packages("tidyverse")
+   library(tidyverse)
+}  
+if (!require("ggplot2")) {
+   install.packages("ggplot2")
+   library(ggplot2)
+}
+if (!require("xlsx")) {
+   install.packages("xlsx")
+   library(xlsx)
+}
+if (!require("irlba")) {
+   install.packages("irlba")
+   library(irlba)
+}
+if (!require(devtools)) {
+   library(devtools)
+   install.packages("devtools")
+   library(devtools)
+}
+if (!require("sinkr")) {
+   library(devtools)
+   install_github("marchtaylor/sinkr")
+   library(sinkr)
+}
+if (!require("ggfortify")) {
+   install.packages("ggfortify")
+   library(ggfortify)
+}
+if (!require("formatR")) {
+   install.packages("formatR")
+   library(formatR)
+}
+if (!require("viridis")) {
+   install.packages("viridis")
+   library(viridis)
+}
+if (!require("patchwork")) {
+   install.packages("patchwork")
+   library(patchwork)
+}
+if (!require("hrbrthemes")) {
+   install.packages("hrbrthemes")
+   library(hrbrthemes)
+}
+if (!require("fmsb")) {
+   install.packages("fmsb")
+   library(fmsb)
+}
+if (!require("colormap")) {
+   install.packages("colormap")
+   library(colormap)
+}
+if (!require("plyr")) {
+   install.packages("plyr")
+   library(plyr)
+}
+if (!require("fmsb")) {
+   install.packages("fmsb")
+   library(fmsb)
+}
+if (!require("scales")) {
+   install.packages("scales")
+   library(scales)
+}   
+if (!require("VIM")) {
+   install.packages("VIM")
+   library(VIM)
+}   
+if (!require("summarytools")) {
+   install.packages("summarytools")
+   library(summary_table)
+}
+if (!require("rstatix")) {
+   install.packages("rstatix")
+   library(rstatix)
+}
+if (!require("ggpubr")) {
+   install.packages("ggpubr")
+   library(ggpubr)
+}
+if (!require("vegan")) {
+   install.packages("vegan")
+   library(vegan)
+}
+if (!require("RVAideMemoire")) {
+   install.packages("RVAideMemoire")
+   library(RVAideMemoire)
+}
+if (!require("stargazer")) {
+   install.packages("stargazer")
+   library(stargazer)
+}
+
+```
+# Introduction: Exploratory Data Analysis (EDA)
+
+The data frame comes in and we can see the Wine_Type and Treatments are presented as Factors. The other 15 variables are the Sensory Characters which are listed in the output below. 1993 rows across 15 attributes is 29,895 data points. However, upon first glance we can see a problem with the data set. Some people didn't vote every time. We don't know why, but maybe the slider on the web app wasn't intuitive enough, or the sensory attribute wasn't a great descriptor, perhaps still another possibility is that the error in recording the intensity rating is completely random. We aren't sure, but before we perform analysis, we'll need to clean the dataset in a way which won't impact the results of our significance testing.
+
+When we examine the main dataframe, we see these NA values which will need to be addressed. Before we can perform any  methods for analysis, our dataset must be cleaned and prepared. First, lets look at a summary of the data and then look at the missing values or gaps in the dataset. NA values do not possess the required characteristics for computation. In order to proceed, we'll use three methods for filling in these gaps and provide insight into these methods and how they affect the dataframe and the resulting computations and analysis. 
+
+Our initial plan is to summarize the data and ensure all the attributes are present. Then, we'll fill in the gaps through interpolation and imputation. Once the gaps are filled in, we'll examine the distribution of the data and validate our decision for estimation and approximation. We perform hypothesis testing after determining out method (non-parametric in this case) Using Principal Component Analysis via Singular Value Decomposition, we'll provide additional insight into the trajectory of sensory attributes based on our treatments. Lastly, we'll provide conclusions for our study. 
+
+```{r Import and Slice, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80), tidy=TRUE)
+#import the data and slice
+df <- read.csv(file = 'Wine Sensory.csv', stringsAsFactors = TRUE, header= TRUE, fileEncoding = "UTF-8-BOM")
+df <- df[-c(1:11)] #Not looking at the Panelist Information
+structure <- as.data.frame(str(df))
+summary <- as.data.frame(summary(df))
+#view(dfSummary(df)) #check this out if you want prettier tables
+
+```
+
+# Actions for Data Cleaning and Feature Engineering
+
+This section describes three methods for data cleaning. In this section, we perform the following three methods for dealing with gaps in our data set:
+
+* Removing NA Values
+* DINEOF functions for interpolating NA values
+* Nearest neighbors for imputing NA values
+
+### Creating a Subset by removing NA Values
+
+There are 1108 missing data points which are listed as NA. I investigate further by using a counter with a boolean operator known as "is.NA" and then take the sums of each of the columns. Once we see what data is missing, we have to determine what we are going to do with the missing values. We could remove the data, that is we could remove the row(s) entirely. We could also impute the data, or replace the missing value with substituted values. That is, we could fill in the missing data with the most common value, the average value, etc. The pro for this method is that we don't lose important data which might be important for the row of data. The con, is the extra layer of uncertainty to the data set as it is now based on estimates. In this particular case, about 20% of the responses are NA. We can remove them and still possess 80% of the data.
+
+```{r Sample Set without NA, echo=FALSE, message=FALSE, warning=FALSE}
+#Original Set
+cat("Original Set:")
+x <- sum(is.na(df))
+y <- nrow(df)
+cat("Total Number of Observations:",y)
+cat("\nNumber of NA values in entire set:",x)
+colSums(is.na(df[3:17]))
+#Subset sample with no NA values, exclusion 
+df.na.rm <- na.omit(df)
+x<- sum(is.na(df.na.rm))
+y<- nrow(df.na.rm)
+cat("Set with all NA values removed:\n")
+cat("\nTotal Number of Observations:",y)
+cat("\nNumber of NA values in the Sample Set:",x,"\n")
+colSums(is.na(df.na.rm[3:17]))
+
+```
+
+### DINEOF (Data Interpolating Empirical Orthogonal Functions) to Solve NA Problem
+
+There are a lot of different ways to perform approximation. In this study, we use the DINEOF (Data Interpolating Empirical Orthogonal Functions) method for optimizing Empirical Orthogonal Function (EOF) analysis on gaps, in this case, NA values in the dataset. This approach gradually solves for EOFs by means of an iterative algorithm to fit EOFS to a given number of non-missing value reference points (small percentage of observations) via RMSE (Root Mean Square Error) minimization. DINEOF is an EOF-based method to fill in missing data from geophysical fields, such as clouds in sea surface termperature. If you want to know more, Beckers and Rixen 2003 provide the basis and origin of this function. Additional papers and the original paper regarding this very interesting topic can be found below:\
+
+* [Journal of Atmospheric and Oceanic Technology](https://journals.ametsoc.org/view/journals/atot/20/12/1520-0426_2003_020_1839_ecadff_2_0_co_2.xml "Journal of Atmospheric and Oceanic Technology")
+
+* [Data interpolating Empirical Orthogonal Functions (DINEOF): A tool for geophysical data analysis](https://www.researchgate.net/publication/277096147_Data_Interpolating_Empirical_Orthogonal_Functions_DINEOF_a_tool_for_geophysical_data_analyses "Research Gate")
+
+* [Applications of DINEOF to Satellite-Derived Chlorophyll-a from a Productive Coastal Region](https://www.mdpi.com/2072-4292/10/9/1449/htm "DINEOF Coastal Region Study")
+
+* [DINEOF Code: March Taylor](https://rdrr.io/github/marchtaylor/sinkr/man/dineof.html "Repository Link")
+
+### Nearest Neighbors to Solve NA Problem
+
+The k-nearest neighbors (kNN) algorithms have grown in popularity especially in clustering and unsupervised machine learning methods. In statistics, kNN is used for classification and regression. In both cases, the input consists of the k closest training examples in the data set. The output depends on whether kNN is used for classification or regression. One problem with kNN is that the algorithm is sensitive to the local structure of the data. In previous studies, kNN has been used in the field of computer vision and feature extraction. One very popular use of kNN is coupled with PCA to perform facial recognition. A typical computational pipeline is as follows:
+
+* Haar face detection
+* Mean-shift tracking analysis
+* PCA or Fisher LDA projecting into feature space, followed by kNN classification
+
+In this study, we use kNN to assign values to the NA values from the sensory panelists and then validate and compare the performance of the algorithm to DINEOF and our NA exclusion function. 
+
+# Key Findings and Insights
+
+Our data exploration resulted in the discovery NA values inside our data set. We examined three different ways to deal with this problem and now validate them by comparing the three methods using Principal Component Analysis. We find interpolation with DINEOF provides the best result followed by excluding the values and kNN nearest neighbors. We could perform a Monte Carlo simulation here to test subsets of data and the effects of interpolative methods on the data set but instead, we'll note that none of the methods drastically change the variance of Principal Components 1 and 2. Then move forward with hypothesis testing, product validation, and data visualization.
+```{r Import and DINEOF, message=TRUE, warning=FALSE, include=FALSE}
+#Import
+df <- read.csv(file = 'Wine Sensory.csv', stringsAsFactors = FALSE, fileEncoding = "UTF-8-BOM") 
+df <- df[-c(1:11)] #Drop the demographic stuff
+#Frames
+df.samp <- df.na.rm 
+df.omit <- df
+df.dineof <- df
+df.knn <- df
+#Convert to Matrices for Computation
+samp.mat <- as.matrix(df.samp[3:17])
+omit.mat <- as.matrix(df.omit[3:17])
+#Perform DINEOF
+dineof.mat <- as.matrix(df.dineof[3:17])
+dineof.method <- dineof(dineof.mat, delta.rms = 1e-02, method="svd")
+```
+
+
+```{r Setup prcomp function and compute PCA with various methods, echo=FALSE, fig.show="hold", message=TRUE, warning=FALSE}
+#Perform kNN
+knn.method <- kNN(df.knn, k=6)
+knn.mat <- as.matrix(knn.method[3:17])
+#Principal Component Analysis, Singular Value Decomposition
+pca.samp <- prcomp(samp.mat, scale=TRUE)
+pca.omit <- prcomp(na.omit(omit.mat), scale=TRUE)
+pca.dineof <- prcomp(dineof.method[["Xa"]], scale=TRUE)
+pca.knn <- prcomp(knn.mat, scale=TRUE)
+#Print Results
+print("Sample Subset PCA")
+summary(pca.samp)
+#print("Omitted PCA")
+#summary(pca.omit)
+print("Dineof PCA")
+summary(pca.dineof)
+print("kNN PCA")
+summary(pca.knn)
+
+fig1 <- fviz_eig(pca.samp, addlabels = TRUE) + ylim(0,40)
+fig2 <- fviz_eig(pca.omit, addlabels = TRUE) + ylim(0,40)
+fig3 <- fviz_eig(pca.dineof, addlabels = TRUE) + ylim(0,40)
+fig4 <- fviz_eig(pca.knn, addlabels = TRUE) + ylim(0,40)
+
+fig1 + labs(title = "Variances - PCA on Subset", x = "Principal Components", y = "% of variances")
+#fig2 + labs(title = "Variances - PCA using Ommision Functon", x = "Principal Components", y = "% of variances")
+fig3 + labs(title = "Variances - PCA using Dineof", x = "Principal Components", y = "% of variances")
+fig4 + labs(title = "Variances - PCA using kNN", x = "Principal Components", y = "% of variances")
+
+```
+
+# Hypothesis and Significance Testing
+
+Okay, so we filled in the gaps in our data set and see the interpolating hasn't changed the variance very much according to Principal Component Analysis. We took a peek at the data in the introduction and saw most of the attributes didn't appear to be normal as there was a clear presence of skewness in our histograms. Our first hypothesis test will test for normality using Shapiro-Wilks.
+
+    H_0: The data is not normal. 
+    H_A: The data is normally distributed
+    
+```{r Shapiro-Wilks, echo=FALSE}
+# Shapiro-Wilks Test for Normality
+
+df %>% shapiro_test( Aroma.Fruity, Aroma.Spicy, Aroma.Smoky, Aroma.Ashy, Aroma.Tar, Flavor.Fruity, Flavor.Spicy, Flavor.Smoky, Flavor.Ashy, Flavor.Tar, Mouthfeel.Astringent, Mouthfeel.Bitter, Mouthfeel.Round, Mouthfeel.Lingering.Ash, Mouthfeel.Metallic) %>% p_format(digits=2, leading.zero = FALSE) %>% p_mark_significant(cutpoints = c(0,1e-04,0.001,0.01,0.05,1), symbols=c("****", "***", "**", "*", ""))
+
+```
+
+
+The Shapiro-Wilks test for normality states that if the results are greater than 0.05 the data is normal. If it is below 0.05, the data significantly deviates from normal distribution. We find various attributes illustrate skewed data, some attributes are normal for specific treatments, but because the set as a whole is not normally distributed, we will focus on non-parametric methods for testing our main hypothesis. Our main hypothesis examines the question, "Are the controls different than the treatment?" Our approach to finding an answer to this question relies on non-parametric methods for data exploration such as Singular Value Decomposition (SVD) or Principal Component Analysis (PCA). Since we already performed PCA to examine the differences in variation after filling the gaps in our data set, let's use the centroid data from the PCA to perform our second hypothesis test using PERMANOVA.
+
+    H_0: Adding products does not change the sensory character of the wine. 
+    H_A: Adding products does change the sensory character of the wine. 
+    
+
+
+```{r Slicing and Dicing the Set prior to interpolation, echo=FALSE, message=TRUE, warning=FALSE}
+
+df <- read.csv(file = 'Wine Sensory.csv', stringsAsFactors = FALSE, fileEncoding = "UTF-8-BOM") # had an issue with plotting where some artifacts came over. This has been resolved, convert strings to factors as first step in DINEOF. Came up again, resides in fviz function, found workaround, can't fix without examining source code on fviz, no time for this currently.
+df <- df[,-c(1:11)]
+
+# Yeast Derivative Subsets Ready for NA filling
+slice.pinot <- subset(df, wine_type=="PinotNoir") #Subset the Pinot Noir
+slice.pinot.yd <- subset(slice.pinot, treatment!="Geosorb40ghL" & treatment!="Geosorb60ghL" & treatment!="YeastDerA100ghL" & treatment!="YeastDerB100ghL") #drop the geosorb
+
+#Geosorb Subsets and Reconstruction Ready for NA filling
+sub.pinot <-subset(df, wine_type=="PinotNoir")
+sub.pinot.control <-subset(sub.pinot, treatment=="Control")
+sub.pinot.geo <-sub.pinot[grep("Geosorb", sub.pinot$treatment),]
+sub.pinot.geo.final <- rbind(sub.pinot.control, sub.pinot.geo)
+
+sub.cs <- subset(df, wine_type=="CabSauv")
+sub.cs.control <-subset(sub.cs, treatment=="Control")
+sub.cs.geo <-sub.cs[grep("Geosorb", sub.cs$treatment),]
+sub.cs.geo.final <- rbind(sub.cs.control, sub.cs.geo)
+
+sub.cf <- subset(df, wine_type=="CabFranc")
+sub.cf.control <-subset(sub.cf, treatment=="Control")
+sub.cf.geo <-sub.cf[grep("Geosorb", sub.cf$treatment),]
+sub.cf.geo.final <- rbind(sub.cf.control, sub.cf.geo)
+
+sub.merlot <- subset(df, wine_type=="Merlot")
+sub.merlot.control <-subset(sub.merlot, treatment=="Control")
+sub.merlot.geo <-sub.merlot[grep("Geosorb", sub.merlot$treatment),]
+sub.merlot.geo.final <- rbind(sub.merlot.control, sub.merlot.geo)
+
+geo.final <- rbind(sub.pinot.geo.final, sub.merlot.geo.final, sub.cs.geo.final, sub.cf.geo.final)
+
+#Fining Agent Subsets and Reconstruction Ready for NA filling
+slice.cs <-subset(df, wine_type=="CabSauv") 
+slice.cf <- subset(df, wine_type=="CabFranc")
+
+sub.fine.cs <- subset(slice.cs, treatment!="Geosorb50ghL" & treatment!="Metschnikowia10ghL" & treatment!="Metschnikowia100ghL" & treatment!="SkimMilk2mLL")
+sub.fine.cf <- subset(slice.cf, treatment!="Geosorb50ghL" & treatment!="CaseiPlus50ghL" & treatment!="Polylact50ghL" ) 
+sub.fine.final.cf <- rbind(sub.cf.control, sub.fine.cf)
+sub.fine.final.cs <- rbind(sub.cs.control, sub.fine.cs)
+
+################################## CUT HERE ###########################################
+
+#Nobile Slices ready for NA Filling
+slice.NOBILE <- df[grep("NOBILE", df$wine_type),]
+nobile.cs <- slice.NOBILE[grep("CabSauv",slice.NOBILE$wine_type),] #slice away the CS
+nobile.cs <- subset(nobile.cs, treatment!="Base5ghL"&treatment!="FreshGran24mo5ghL"&treatment!="OriginalSpice5ghL"&treatment!="SweetVanilla5gL")
+nobile.cf <- slice.NOBILE[grep("CabFranc", slice.NOBILE$wine_type),] #slice away the CF
+nobile.cf <- subset(nobile.cf, treatment!="AmFresh5gL" & treatment!="Base5ghL"&treatment!="FreshGran24mo5gL"&treatment!="Prototype75gL")
+
+#######################################################################################
+
+
+############################# DINEOF, PCA, PERMANOVA #################################
+
+#Yeast Derivative DINEOF and PCA and PERMANOVA
+slice.pinot.yd[,'treatment']<-as.factor(slice.pinot.yd[,'treatment'])
+slice.pinot.yd$treatment <- mapvalues(slice.pinot.yd$treatment, from=c("YeastDerB50ghL"), to = c("Inactivated Dry Yeasts"))
+slice.pinot.yd$treatment <- mapvalues(slice.pinot.yd$treatment, from=c("YeastDerA50ghL"), to = c("Yeast Hulls"))
+pinot.yd <- slice.pinot.yd[3:17]
+pinot.mat <- as.matrix(pinot.yd)
+pinot.ind <- slice.pinot.yd[2]
+dineof.pinot.yd <- dineof(pinot.mat, delta.rms = 1e-02, method="svd") # DINEOF for the Yeast Derivatives
+pca.pinot.yd <-prcomp(dineof.pinot.yd[["Xa"]], scale=TRUE) #PCA for the Yeast Derivatives
+pinot <- data.frame(cbind(pinot.ind, dineof.pinot.yd[["Xa"]])) #Pinot reconstruct
+scale.pinot <- scale(pinot[,2:16])
+adonis(scale.pinot ~ treatment, data = pinot, method='eu') #Adonis for calculating Euclidean Distance
+pairwise.perm.manova(pinot[,2:16],pinot$treatment) #Pairwise Comparison using RVAideMemoire
+
+# Checking Assumptions of PERMANOVA using BETADISPER
+dst <- dist(pinot[,2:16])
+pinot.bd <- betadisper(dst, pinot$treatment)
+pinot.bd
+anova(pinot.bd)
+permutest(pinot.bd)
+labs <- paste("Dimension", 2:16, "(", 
+              round(100*pinot.bd$eig / sum(pinot.bd$eig), 2), "%)")
+
+plot(pinot.bd, cex=1, pch=15:17,
+     main="Pinot data: MDS coordinates", cex.lab=1.25,
+     xlab=labs[1], ylab=labs[2],
+     hull=FALSE, ellipse=TRUE, conf=0.68, lwd=2)
+
+#Geosorb DINEOF, PCA, and PERMANOVA
+geo.final[,'treatment']<-as.factor(geo.final[,'treatment'])
+geo.ind <- geo.final[2]
+geosorb.mat <- as.matrix(geo.final[3:17])
+dineof.geosorb <- dineof(geosorb.mat, delta.rms = 1e-02, method="svd") # DINEOF for the Geosorb
+pca.geosorb <-prcomp(dineof.geosorb[["Xa"]], scale=TRUE) #PCA for the Geosorb
+geo <- data.frame(cbind(geo.ind, dineof.geosorb[["Xa"]])) #Geo reconstruct
+scale.geo <- scale(geo[,2:16])
+adonis(scale.geo ~ treatment, data = geo, method='eu') #Adonis for calculating Euclidean Distance
+pairwise.perm.manova(geo[,2:16],geo$treatment) #Pairwise Comparison using RVAideMemoire
+
+# Checking Assumptions of PERMANOVA using BETADISPER
+dst <- dist(geo[,2:16])
+geo.bd <- betadisper(dst, geo$treatment)
+geo.bd
+anova(geo.bd)
+permutest(geo.bd)
+labs <- paste("Dimension", 2:16, "(", 
+              round(100*geo.bd$eig / sum(geo.bd$eig), 2), "%)")
+
+plot(geo.bd, cex=1, pch=15:17,
+     main="Geo data: MDS coordinates", cex.lab=1.25,
+     xlab=labs[1], ylab=labs[2],
+     hull=FALSE, ellipse=TRUE, conf=0.68, lwd=2)
+
+#Fining Agents DINEOF, PCA, and PERMANOVA
+#Cabernet Sauvignon
+sub.fine.final.cs[,'treatment'] <- as.factor(sub.fine.final.cs[,'treatment'])
+fine.cs.ind <- sub.fine.final.cs[2]
+fine.slice.cs <- sub.fine.final.cs[3:17]
+fine.mat.cs <- as.matrix(fine.slice.cs)
+dineof.fine.cs <- dineof(fine.mat.cs, delta.rms = 1e-02, method = "svd") #DINEOF for the Fining Agents
+pca.fine.cs <- prcomp(dineof.fine.cs[["Xa"]], scale=TRUE) #PCA for the CS Fining Agents
+fine.cs <- data.frame(cbind(fine.cs.ind, dineof.fine.cs[["Xa"]])) #CS reconstruct
+scale.cs <- scale(fine.cs[,2:16])
+adonis(scale.cs ~ treatment, data = fine.cs, method='eu') #Adonis for calculating Euclidean Distance
+pairwise.perm.manova(fine.cs[,2:16],fine.cs$treatment) #Pairwise Comparison using RVAideMemoire
+
+dst <- dist(fine.cs[,2:16])
+fine.cs.bd <- betadisper(dst, fine.cs$treatment)
+fine.cs.bd
+anova(fine.cs.bd)
+permutest(fine.cs.bd)
+labs <- paste("Dimension", 2:16, "(", 
+              round(100*fine.cs.bd$eig / sum(fine.cs.bd$eig), 2), "%)")
+
+plot(fine.cs.bd, cex=1, pch=15:17,
+     main="Fine CS data: MDS coordinates", cex.lab=1.25,
+     xlab=labs[1], ylab=labs[2],
+     hull=FALSE, ellipse=TRUE, conf=0.68, lwd=2)
+
+#Cabernet Franc
+sub.fine.final.cf[,'treatment']<-as.factor(sub.fine.final.cf[,'treatment'])
+fine.cf.ind <- sub.fine.final.cf[2]
+fine.slice.cf <- sub.fine.final.cf[3:17]
+fine.mat.cf <- as.matrix(fine.slice.cf)
+dineof.fine.cf <- dineof(fine.mat.cf, delta.rms = 1e-02, method="svd") #DINEOF for the CF Fining Agents
+pca.fine.cf <- prcomp(dineof.fine.cf[["Xa"]], scale=TRUE) #PCA for CF Fining Agents
+fine.cf <- data.frame(cbind(fine.cf.ind, dineof.fine.cf[["Xa"]])) #CF reconstruct
+scale.cf <- scale(fine.cf[,2:16])
+adonis(scale.cf ~ treatment, data = fine.cf, method='eu') #Adonis for calulating Euclidean Distance
+pairwise.perm.manova(fine.cf[,2:16],fine.cf$treatment) #Pairwise Comparison using RVAideMemoire
+
+# Checking Assumptions of PERMANOVA using BETADISPER
+dst <- dist(fine.cf[,2:16])
+fine.cf.bd <- betadisper(dst, fine.cf$treatment)
+fine.cf.bd 
+anova(fine.cf.bd )
+permutest(fine.cf.bd )
+labs <- paste("Dimension", 2:16, "(", 
+              round(100*fine.cf.bd$eig / sum(fine.cf.bd$eig), 2), "%)")
+
+plot(fine.cf.bd , cex=1, pch=15:17,
+     main="Fine CF data: MDS coordinates", cex.lab=1.25,
+     xlab=labs[1], ylab=labs[2],
+     hull=FALSE, ellipse=TRUE, conf=0.68, lwd=2)
+
+#NOBILE DINEOF, PCA, and PERMANOVA
+#Cabernet Sauvignon
+nobile.cs[,'treatment']<- as.factor(nobile.cs[,'treatment'])
+ind.nobile.cs <- nobile.cs[2]
+slice.nobile.cs <- nobile.cs[3:17]
+mat.nobile.cs <- as.matrix(slice.nobile.cs)
+dineof.nobile.cs <- dineof(mat.nobile.cs, delta.rms =1e-02, method="svd")
+pca.nobile.cs <- prcomp(dineof.nobile.cs[["Xa"]], scale=TRUE)
+nobile.cs <- data.frame(cbind(ind.nobile.cs, dineof.nobile.cs[["Xa"]])) #REBUILT with no NA
+scale.nobile.cs <- scale(nobile.cs[,2:16])
+adonis(scale.nobile.cs ~ treatment, data = nobile.cs, method='eu')
+pairwise.perm.manova(nobile.cs[,2:16], nobile.cs$treatment)
+
+# Checking Assumptions of PERMANOVA using BETADISPER
+dst <- dist(nobile.cs[,2:16])
+nobile.cs.bd <- betadisper(dst, nobile.cs$treatment)
+nobile.cs.bd 
+anova(nobile.cs.bd )
+permutest(nobile.cs.bd )
+labs <- paste("Dimension", 2:16, "(", 
+              round(100*nobile.cs.bd$eig / sum(nobile.cs.bd$eig), 2), "%)")
+
+plot(nobile.cs.bd , cex=1, pch=15:17,
+     main="Nobile CS data: MDS coordinates", cex.lab=1.25,
+     xlab=labs[1], ylab=labs[2],
+     hull=FALSE, ellipse=TRUE, conf=0.68, lwd=2)
+
+#Cabernet Franc
+nobile.cf[,'treatment']<- as.factor(nobile.cf[,'treatment'])
+ind.nobile.cf <- nobile.cf[2]
+slice.nobile.cf <- nobile.cf[3:17]
+mat.nobile.cf <- as.matrix(slice.nobile.cf)
+dineof.nobile.cf <- dineof(mat.nobile.cf, delta.rms =1e-02, method="svd")
+pca.nobile.cf <- prcomp(dineof.nobile.cf[["Xa"]], scale=TRUE)
+nobile.cf <- data.frame(cbind(ind.nobile.cf, dineof.nobile.cf[["Xa"]]))
+scale.nobile.cf <- scale(nobile.cf[,2:16])
+adonis(scale.nobile.cf ~ treatment, data = nobile.cf, method='eu')
+pairwise.perm.manova(nobile.cf[,2:16], nobile.cf$treatment)
+
+# Checking Assumptions of PERMANOVA using BETADISPER
+dst <- dist(nobile.cf[,2:16])
+nobile.cf.bd <- betadisper(dst, nobile.cf$treatment)
+nobile.cf.bd 
+anova(nobile.cf.bd)
+permutest(nobile.cf.bd )
+labs <- paste("Dimension", 2:16, "(", 
+              round(100*nobile.cf.bd$eig / sum(nobile.cf.bd$eig), 2), "%)")
+
+plot(nobile.cf.bd , cex=1, pch=15:17,
+     main="Nobile CF data: MDS coordinates", cex.lab=1.25,
+     xlab=labs[1], ylab=labs[2],
+     hull=FALSE, ellipse=TRUE, conf=0.68, lwd=2)
+
+```
+# Plotting Principal Component Analysis
+
+This dataset begins with 288 panelists. We assessed the effect of two methods of EOF (Empirical Orthogonal Functions) on these sets after slicing the frame and calling an index from multiple factors. The treatment factor contains the winemaking ingredient trials. Each of the plots listed below is the Principal Component Analysis of the product trials related sensory character. Future concepts might include theoretical hyper-planes or other methods for separation, classification, or regression. We begin by plotting the Yeast Derivatives, and offer the other plots from our other factors below. 
+
+```{r Plot the PCA, warning=FALSE, echo=FALSE, message=FALSE}
+# Plots
+
+library(plyr)
+
+#Yeast Derivatives 
+slice.pinot.yd$treatment <- mapvalues(slice.pinot.yd$treatment, from=c("YeastDerB50ghL"), to = c("Inactivated Dry Yeasts"))
+slice.pinot.yd$treatment <- mapvalues(slice.pinot.yd$treatment, from=c("YeastDerA50ghL"), to = c("Yeast Hulls"))
+
+plotYeastDer <- fviz_pca_biplot(pca.pinot.yd, 
+                                label="var", 
+                                labelsize=3,
+                                geom = c("text","point"),
+                                arrowsize=.25,
+                                label.alpha=.5,
+                                habillage = slice.pinot.yd$treatment,
+                                col.ind = slice.pinot.yd$treatment,
+                                legend.title= "",
+                                addEllipses = TRUE,
+                                ellipse.alpha =.25,
+                                ellipse.level=0.75, 
+                                palette= c("#eb0909","#4c2bba","#2b8235"),
+                                repel=TRUE, 
+                                col.var="darkblue")+ 
+labs(title="")
+
+plotYeastDer +
+   scale_color_manual(values=c("#eb0909","#4c2bba","#2b8235")) +
+   theme(plot.title= element_text(hjust=0.5),
+         legend.position = "bottom"
+         )
+
+# Geosorb
+#tiff('PCA Geosorb.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+geo.ind$treatment<- factor(geo.ind$treatment, levels = c("Control","Geosorb40ghL", "Geosorb50ghL", "Geosorb60ghL", "Geosorb100ghL"))
+plotGeosorb <- fviz_pca_biplot(pca.geosorb,
+                               geom = c("point","text"),
+                               labelsize=3,
+                               arrowsize=.25,
+                               pointshape= 21, pointsize=1,
+                               legend.title ="",
+                               fill.ind=geo.ind$treatment, 
+                               label="var",
+                               label.alpha=5.,
+                               addEllipses = TRUE,
+                               ellipse.type= "norm",
+                               ellipse.alpha=.25,
+                               ellipse.level=.75,
+                               alpha=.7,
+                               habillage = geo.ind$treatment,
+                               palette= c("#eb0909","#4c2bba","#2b8235","#ff47da","#f7e919"),
+                               repel = TRUE,
+                               col.var="darkblue")+
+labs(title="")
+plotGeosorb +
+   theme(plot.title = element_text(hjust = .5),
+         legend.position = "bottom"
+         )
+
+#dev.off()
+
+# Fining Agents CS
+#tiff('PCA Fining CS.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+sub.fine.final.cs$treatment <- mapvalues(sub.fine.final.cs$treatment, from = c("Geosorb100ghL"), to = c("Geosorb"))
+sub.fine.final.cs$treatment <- mapvalues(sub.fine.final.cs$treatment, from = c("SkimMilk10mLL"), to =c("Skim Milk"))
+
+plotFineCS <- fviz_pca_biplot(pca.fine.cs,
+                              label="var",
+                              labelsize=3,
+                              geom = c("text", "point"),
+                              arrowsize=.25,
+                              label.alpha=5.,
+                              habillage = sub.fine.final.cs$treatment,
+                              col.ind = sub.fine.final.cs$treatment,
+                              legend.title ="",
+                              addEllipses = TRUE,
+                              ellipse.alpha=.25,
+                              ellipse.level=.75,
+                              palette= c("#eb0909","#4c2bba","#2b8235"),
+                              repel = TRUE,
+                              col.var="darkblue")+
+labs(title="")
+plotFineCS +
+   scale_color_manual(values = c("#eb0909","#4c2bba","#2b8235"))+
+   theme(plot.title = element_text(hjust = .5),
+         legend.position = "bottom")
+         
+#plot.margin = unit(c(1,1,1.5,1.2),"cm") Nice for expanding the margin
+#dev.off()
+
+
+#Fining Agents CF
+#tiff('PCA Fining CF.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+
+sub.fine.final.cf$treatment <- mapvalues(sub.fine.final.cf$treatment, from = c("Geosorb100ghL"), to = c("Geosorb"))
+sub.fine.final.cf$treatment <- mapvalues(sub.fine.final.cf$treatment, from = c("CaseiPlus100ghL"), to = c("Casei Plus"))
+sub.fine.final.cf$treatment <- mapvalues(sub.fine.final.cf$treatment, from = c("Polylact100ghL"), to = c("Polylact"))
+sub.fine.final.cf$treatment <- ordered(sub.fine.final.cf$treatment, levels= c("Control","Geosorb","Casei Plus","Polylact"))
+
+plotFineCF <- fviz_pca_biplot(pca.fine.cf,
+                              label="var",
+                              labelsize=3,
+                              geom = c("text", "point"),
+                              arrowsize=.25,
+                              label.alpha=5.,
+                              habillage = sub.fine.final.cf$treatment,
+                              col.ind = sub.fine.final.cf$treatment,
+                              legend.title ="",
+                              addEllipses = TRUE,
+                              ellipse.alpha=.25,
+                              ellipse.level=.75,
+                              palette= c("#eb0909","#4c2bba","#2b8235","#ff47da"),
+                              repel = TRUE,
+                              col.var="darkblue")+
+labs(title="")
+plotFineCF +
+   scale_color_manual(values = c("#eb0909","#4c2bba","#2b8235","#ff47da"))+
+   theme(plot.title = element_text(hjust = .5),
+         legend.position = "bottom")
+#dev.off()
+
+
+#############################Nobile Cabernet Sauvignon#############################
+
+#tiff('PCA Nobile CS.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+nobile.cs$treatment <- mapvalues(nobile.cs$treatment, from = c("Base10ghL"), to = c("Base"))
+nobile.cs$treatment <- mapvalues(nobile.cs$treatment, from = c("FreshGran24mo10ghL"), to = c("Fresh Granular"))
+nobile.cs$treatment <- mapvalues(nobile.cs$treatment, from = c("OriginalSpice10ghL"), to = c("Original Spice"))
+nobile.cs$treatment <- mapvalues(nobile.cs$treatment, from = c("SweetVanilla10gL"), to = c("Sweet Vanilla"))
+nobile.cs$treatment <- ordered(nobile.cs$treatment, levels= c("Control","Base","Fresh Granular","Original Spice", "Sweet Vanilla"))
+
+plotNobileCS <- fviz_pca_biplot(pca.nobile.cs,
+                               geom = c("point","text"),
+                               labelsize=3,
+                               arrowsize=.25,
+                               pointsize=1,
+                               legend.title ="",
+                               fill.ind=nobile.cs$treatment, 
+                               label="var",
+                               label.alpha=5.,
+                               addEllipses = TRUE,
+                               ellipse.type= "norm",
+                               ellipse.alpha=.25,
+                               ellipse.level=.55,
+                               alpha=.7,
+                               habillage = nobile.cs$treatment,
+                               palette= c("#eb0909","#4c2bba","#2b8235","#ff47da","#f7e919"),
+                               repel = TRUE,
+                               col.var="darkblue")+
+
+labs(title="")
+plotNobileCS +
+   theme(plot.title = element_text(hjust = .5),
+         legend.position = "bottom")
+#dev.off()
+     
+################################### NOBILE CABFRANC #####################################
+
+#tiff('PCA Nobile CF.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+nobile.cf$treatment <- mapvalues(nobile.cf$treatment, from = c("Prototype710gL"), to = c("Prototype 7"))
+nobile.cf$treatment <- mapvalues(nobile.cf$treatment, from = c("AmFresh10gL"), to = c("American Fresh"))
+nobile.cf$treatment <- mapvalues(nobile.cf$treatment, from = c("FreshGran24mo10gL"), to = c("Fresh Granular"))
+nobile.cf$treatment <- ordered(nobile.cf$treatment, levels= c("Control","Prototype 7","Fresh Granular","American Fresh"))
+
+plotNobileCF <- fviz_pca_biplot(pca.nobile.cf,
+                               geom = c("point","text"),
+                               labelsize=3,
+                               arrowsize=.25,
+                               pointshape=21, pointsize=1,
+                               legend.title ="",
+                               fill.ind=nobile.cf$treatment, 
+                               label="var",
+                               label.alpha=5.,
+                               addEllipses = TRUE,
+                               ellipse.type= "norm",
+                               ellipse.alpha=.25,
+                               ellipse.level=.55,
+                               alpha=.7,
+                               habillage = nobile.cf$treatment,
+                               #palette= c("#eb0909","#4c2bba","#2b8235","#ff47da"),
+                               repel = TRUE,
+                               col.var="darkblue")+
+
+labs(title="")
+plotNobileCF +
+   theme(plot.title = element_text(hjust = .5),
+         legend.position = "bottom")
+#dev.off()    
+
+#,"#fa0505","#05fa15","#cd05fa","#05b9fa"
+```
+
+```{r Movie, eval=FALSE, include=FALSE}
+#3dimensional object
+
+#library(rgl)
+
+#library(pca3d)
+
+#library(magick)
+
+#pca3d(res.pca2, group=dfPCA$treatment, biplot=TRUE, biplot.vars = 12, legend="bottomright")
+
+#makeMoviePCA(clean=TRUE, type="gif", movie="movie", convert=TRUE)
+```
+
+# Building Radar Plots
+
+Radar plots are some of the most widely used plots in wine sensory analysis and are also some of the most controversial representations of data. A radar or spider or web chart is a two-dimensional chart type designed to plot one or more series of values over multiple quantitative variables. Each variable has its own axis, all axes are joined in the center of the figure. Spider charts are often criticized by data scientists. The most common complaints involve the circular layout being more difficult to read, the lack of ranking, and the category order having a huge impact on the visual aspect and interpretability of the chart. Furthermore, other issues arise around scales, overplotting, and over-evaluation of differences. We use these plots because they are widely accepted in the wine industry. 
+
+```{r Radar Plots, echo=FALSE}
+#Reload the frame
+df <- read.csv(file = 'Wine Sensory.csv', stringsAsFactors = FALSE, fileEncoding = "UTF-8-BOM") # had an issue with plotting where some artifacts came over. This has been resolved, convert strings to factors as first step in DINEOF.
+
+
+# Pinot Noir Slices
+df <- df[,-c(1:11)]#remove the demographic and panelist information
+slice.pinot <- subset(df, wine_type=="PinotNoir") #Subset the Pinot Noir
+slice.pinot.yd <- subset(slice.pinot, treatment!="Geosorb40ghL" & treatment!="YeastDerA100ghL" & treatment!="YeastDerB100ghL") #drop the geosorb
+
+#Pinot DINEOF
+slice.pinot.yd[,'treatment']<-as.factor(slice.pinot.yd[,'treatment'])
+pinot.yd <- slice.pinot.yd[3:17]
+pinot.mat <- as.matrix(pinot.yd)
+dineof.pinot.yd <- dineof(pinot.mat, delta.rms = 1e-02, method="svd") # DINEOF for the Yeast Derivatives
+
+#Build new frame, sorta tedious could rework this:
+df <- data.frame(slice.pinot.yd[,'treatment'],dineof.pinot.yd[["Xa"]]) #This works, rename that first column, you could do this better in the split
+names(df)[1]<-"treatment"
+
+#Build Fining Agent Frames
+sub.fine.final.cf <- rbind(sub.cf.control, sub.fine.cf) #This is from slices above section
+sub.fine.final.cs <- rbind(sub.cs.control, sub.fine.cs) #This is from slices in above section
+
+df.fine.cf <- data.frame(sub.fine.final.cf[,'treatment'],dineof.fine.cf[["Xa"]])
+names(df.fine.cf)[1] <- "treatment"
+df.fine.cs <- data.frame(sub.fine.final.cs[,'treatment'],dineof.fine.cs[["Xa"]])
+names(df.fine.cs)[1] <-"treatment"
+
+#################### Nobile Frames ######################
+nobile.cs
+nobile.cf
+
+# Split for the Nobile Frames
+split.nobile.cs <- split(nobile.cs, nobile.cs$treatment)
+split.nobile.cf <- split(nobile.cf, nobile.cf$treatment)
+
+nobile.cf.control <- split.nobile.cf$Control[2:16]
+nobile.cf.p7 <- split.nobile.cf$`Prototype 7`[2:16]
+nobile.cf.amfresh <- split.nobile.cf$`American Fresh`[2:16]
+nobile.cf.freshgran <- split.nobile.cf$`Fresh Granular`[2:16]
+
+nobile.cs.control <- split.nobile.cs$Control[2:16]
+nobile.cs.ospice <- split.nobile.cs$`Original Spice`[2:16]
+nobile.cs.sweet <- split.nobile.cs$`Sweet Vanilla`[2:16]
+nobile.cs.freshgran <- split.nobile.cs$`Fresh Granular`[2:16]
+nobile.cs.base <- split.nobile.cs$Base[2:16]
+
+#Split for Yeast Derivatives
+split.treatment <- split(df, df$treatment)
+Geosorb <- split.treatment$Geosorb60ghL[2:16]
+Hulls <-split.treatment$YeastDerA50ghL[2:16]
+IDY <- split.treatment$YeastDerB50ghL[2:16]
+Control <- split.treatment$Control[2:16]
+
+#Splits for Fining Agents
+split.fine.cf.treatment <- split(df.fine.cf, df.fine.cf$treatment)
+split.fine.cs.treatment <- split(df.fine.cs, df.fine.cs$treatment)
+
+Polylact <- split.fine.cf.treatment$Polylact100ghL[2:16]
+CaseiPlus <- split.fine.cf.treatment$CaseiPlus100ghL[2:16]
+SkimMilk <- split.fine.cs.treatment$SkimMilk10mLL[2:16]
+GeosorbCF <- split.fine.cf.treatment$Geosorb100ghL[2:16]
+GeosorbCS <- split.fine.cs.treatment$Geosorb100ghL[2:16]
+ControlCS <- split.fine.cs.treatment$Control[2:16]
+ControlCF <- split.fine.cf.treatment$Control[2:16]
+
+# Compute Average for Yeast Derivative Factors and add the two requisite boundaries to the plot
+Hulls <- colMeans(x=Hulls)
+IDY <- colMeans(x=IDY) 
+Geosorb <- colMeans(x=Geosorb)
+Control <- colMeans(x=Control)
+final <- rbind(Control,Hulls,IDY)
+maxmin <- rbind(rep(9,15), rep(3,15), final) #I had to calculate max min for the set to make this right.
+data <- as.data.frame(maxmin)
+
+# Compute Average for Fining Agent Factors and add the two requisite boundaries to the plot
+
+SkimMilk <- colMeans(x=SkimMilk)
+Control <- colMeans(x=ControlCS)
+Geosorb <- colMeans(x=GeosorbCS)
+final.cs <- rbind(Control, Geosorb, SkimMilk)
+maxmin.cs <- rbind(rep(8,15), rep(3.7,15),final.cs)
+Control <- colMeans(x=ControlCF)
+Geosorb <- colMeans(x=GeosorbCF)
+Polylact <- colMeans(x=Polylact)
+CaseiPlus <- colMeans(x=CaseiPlus)
+final.cf <- rbind(Control, Geosorb, Polylact, CaseiPlus)
+maxmin.cf <- rbind(rep(9.8,15), rep(3.65,15), final.cf)
+data.cs <- as.data.frame(maxmin.cs)
+data.cf <-as.data.frame(maxmin.cf)
+
+#Compute Averages for the Nobile Factors and add the two requisite boundaries to the plot
+Control <- colMeans(x=nobile.cf.control) 
+P7 <- colMeans(x=nobile.cf.p7)
+AmFresh <- colMeans(x=nobile.cf.amfresh)
+FreshGran <-colMeans(x=nobile.cf.freshgran)
+final.nobile.cf <- rbind(Control, P7, AmFresh, FreshGran)
+maxmin.nobile.cf <- rbind(rep(15,15),rep(0,15),final.nobile.cf)
+nobile.data.cf <- as.data.frame(maxmin.nobile.cf)
+
+Control <- colMeans(x=nobile.cs.control)
+OSpice <- colMeans(x=nobile.cs.ospice)
+Sweet <- colMeans(x=nobile.cs.sweet)
+FreshGran <- colMeans(x=nobile.cs.freshgran)
+Base <- colMeans(x=nobile.cs.base)
+final.nobile.cs <- rbind(Control, OSpice, Sweet, FreshGran, Base)
+maxmin.nobile.cs <- rbind(rep(15,15),rep(0,15),final.nobile.cs)
+nobile.data.cs <- as.data.frame(maxmin.nobile.cs)
+
+########################## Plot Yeast Derivatives ################################33
+
+#tiff('Radar Yeast Derivatives.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+
+create_beautiful_radarchart <- function(data, color = "#D73027", 
+                                        vlabels = colnames(data), vlcex = 0.7,
+                                        title = NULL, caxislabels=NULL, ...){
+# plot with default options:
+radarchart( data  , axistype=4, maxmin=TRUE,
+    #customize the polygon
+    pcol=color , pfcol= scales::alpha(color,0.3) , plwd=1 , plty=1,
+    #customize the grid
+    cglcol="grey", cglty=1, cglwd=0.8,
+    #Customize the axis
+    axislabcol = "grey",
+    #Variable Labels
+    vlcex= vlcex, vlabels=vlabels, caxislabels = NULL
+    )
+}
+# Reduce plot margin using par()
+op <- par(mar = c(3, 2, 2, 2))
+create_beautiful_radarchart(data, caxislabels=NULL , color=c("#eb0909","#4c2bba","#2b8235","#f7e919"))
+
+# Add a legend
+legend(
+ x = "bottom", inset=c(0,-.1), legend = c("Control", "Yeast Hulls","Inactivated Dry Yeasts","Geosorb"), horiz = TRUE,
+ bty = "n", pch = 20 , col = c("#eb0909","#4c2bba","#2b8235","#f7e919"),
+ text.col = "black", cex = 1, pt.cex = 1.5, xpd=TRUE
+ )
+par(op)
+#dev.off()
+
+########################### Plot CS Fining ##################################
+
+#tiff('Radar CS Fining.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+create_beautiful_radarchart <- function(data.cs, color = "#D73027", 
+                                        vlabels = colnames(data.cs), vlcex = 0.7,
+                                        title = NULL, caxislabels=NULL, ...){
+# plot with default options:
+radarchart( data.cs  , axistype=4, maxmin=TRUE,
+    #customize the polygon
+    pcol=color , pfcol= scales::alpha(color,0.5) , plwd=1 , plty=1,
+    #customize the grid
+    cglcol="grey", cglty=1, cglwd=0.8,
+    #Customize the axis
+    axislabcol = "grey",
+    #Variable Labels
+    vlcex= vlcex, vlabels=vlabels, caxislabels = NULL
+    )
+}
+# Reduce plot margin using par()
+op <- par(mar = c(3, 2, 2, 2))
+create_beautiful_radarchart(data.cs, caxislabels=NULL , color=c("#eb0909","#4c2bba","#2b8235"))
+
+# Add a legend
+legend(
+x = "bottom", inset=c(0,-.1), legend = c("Control", "Geosorb", "Skim Milk") , horiz = TRUE,
+bty = "n", pch = 20 , col = c("#eb0909","#4c2bba","#2b8235"),
+ text.col = "black", cex = 1, pt.cex = 1.5, xpd=TRUE
+ )
+par(op)
+
+#dev.off()
+
+########################## Plot CF Fining ###################################
+
+#tiff('Radar CF Fining.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+
+create_beautiful_radarchart <- function(data.cf, color = "#D73027", 
+                                        vlabels = colnames(data.cf), vlcex = 0.7,
+                                        title = NULL, caxislabels=NULL, ...){
+# plot with default options:
+radarchart( data.cf  , axistype=4, maxmin=TRUE,
+    #customize the polygon
+    pcol=color , pfcol= scales::alpha(color,0.30) , plwd=1 , plty=1,
+    #customize the grid
+    cglcol="grey", cglty=1, cglwd=0.8,
+    #Customize the axis
+    axislabcol = "grey",
+    #Variable Labels
+    vlcex= vlcex, vlabels=vlabels, caxislabels = NULL
+    )
+}
+# Reduce plot margin using par()
+op <- par(mar = c(3, 2, 2, 2))
+create_beautiful_radarchart(data.cf, caxislabels=NULL , color=c("#eb0909","#4c2bba","#2b8235","#f7e919"))
+
+# Add a legend
+legend(
+x = "bottom", inset=c(0,-.1), legend = c("Control", "Geosorb", "Polylact", "Casei Plus") , horiz = TRUE,
+bty = "n", pch = 20 , col = c("#eb0909","#4c2bba","#2b8235","#f7e919"),
+ text.col = "black", cex = 1, pt.cex = 1.5, xpd=TRUE
+ )
+par(op)
+
+##dev.off()
+
+######################### Plot Nobile CS ##############################
+
+#tiff('Radar CS Nobile.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+
+create_beautiful_radarchart <- function(nobile.data.cs, color = "#D73027", 
+                                        vlabels = colnames(nobile.data.cs), vlcex = 0.7,
+                                        title = NULL, caxislabels=NULL, ...){
+# plot with default options:
+radarchart(nobile.data.cs  , axistype=4, maxmin=TRUE,
+    #customize the polygon
+    pcol=color , pfcol= scales::alpha(color,0.40) , plwd=1 , plty=1,
+    #customize the grid
+    cglcol="grey", cglty=1, cglwd=0.8,
+    #Customize the axis
+    axislabcol = "grey",
+    #Variable Labels
+    vlcex= vlcex, vlabels=vlabels, caxislabels = NULL
+    )
+}
+# Reduce plot margin using par()
+op <- par(mar = c(3, 2, 2, 2))
+create_beautiful_radarchart(nobile.data.cs, caxislabels=NULL , color=c("#eb0909","#4c2bba","#2b8235","#ff47da","#f7e919"))
+
+# Add a legend
+legend(
+x = "bottom", inset=c(0,-.1), legend = c("Control", "Original Spice", "Sweet Vanilla", "Fresh Granular", "Base") , horiz = TRUE,
+bty = "n", pch = 20 , col = c("#eb0909","#4c2bba","#2b8235","#ff47da","#f7e919"),
+ text.col = "black", cex = 1, pt.cex = 1.5, xpd=TRUE,xjust=.5
+ )
+par(op)
+
+#dev.off()
+
+######################### Plot Nobile CF ##############################
+
+#tiff('Radar CF Nobile.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+
+create_beautiful_radarchart <- function(nobile.data.cf, color = "#D73027", 
+                                        vlabels = colnames(nobile.data.cf), vlcex = 0.7,
+                                        title = NULL, caxislabels=NULL, ...){
+# plot with default options:
+radarchart(nobile.data.cf  , axistype=4, maxmin=TRUE,
+    #customize the polygon
+    pcol=color , pfcol= scales::alpha(color,0.40) , plwd=1 , plty=1,
+    #customize the grid
+    cglcol="grey", cglty=1, cglwd=0.8,
+    #Customize the axis
+    axislabcol = "grey",
+    #Variable Labels
+    vlcex= vlcex, vlabels=vlabels, caxislabels = NULL
+    )
+}
+# Reduce plot margin using par()
+op <- par(mar = c(3, 2, 2, 2))
+create_beautiful_radarchart(nobile.data.cf, caxislabels=NULL , color=c("#eb0909","#4c2bba","#2b8235","#ff47da"))
+
+# Add a legend
+legend(
+x = "bottom", inset=c(0,-.1), legend = c("Cab Franc Control", "Prototype Seven", "American Fresh", "Fresh Granular") , horiz = TRUE,
+bty = "n", pch = 20 , col = c("#eb0909","#4c2bba","#2b8235","#ff47da"),
+ text.col = "black", cex = 1, pt.cex = 1.5, xpd=TRUE, xjust=.5
+ )
+par(op)
+
+#dev.off()
+```
+```{r fuck me with this request}
+#Reload the frame
+df <- read.csv(file = 'Wine Sensory.csv', stringsAsFactors = FALSE, fileEncoding = "UTF-8-BOM") # had an issue with plotting where some artifacts came over. This has been resolved, convert strings to factors as first step in DINEOF.
+
+
+# Pinot Noir Slices
+df <- df[,-c(1:11)]#remove the demographic and panelist information
+slice.pinot <- subset(df, wine_type=="PinotNoir") #Subset the Pinot Noir
+slice.pinot.yd <- subset(slice.pinot, treatment!="Geosorb40ghL" & treatment!="YeastDerA100ghL" & treatment!="YeastDerB100ghL") #drop the geosorb
+
+#Pinot DINEOF
+slice.pinot.yd[,'treatment']<-as.factor(slice.pinot.yd[,'treatment'])
+pinot.yd <- slice.pinot.yd[3:17]
+pinot.mat <- as.matrix(pinot.yd)
+dineof.pinot.yd <- dineof(pinot.mat, delta.rms = 1e-02, method="svd") # DINEOF for the Yeast Derivatives
+
+#Build new frame, sorta tedious could rework this:
+df <- data.frame(slice.pinot.yd[,'treatment'],dineof.pinot.yd[["Xa"]]) #This works, rename that first column, you could do this better in the split
+names(df)[1]<-"treatment"
+
+#Split for Yeast Derivatives
+split.treatment <- split(df, df$treatment)
+Geosorb <- split.treatment$Geosorb60ghL[2:16]
+Hulls <-split.treatment$YeastDerA50ghL[2:16]
+IDY <- split.treatment$YeastDerB50ghL[2:16]
+Control <- split.treatment$Control[2:16]
+
+# Compute Average for Yeast Derivative Factors and add the two requisite boundaries to the plot
+Hulls <- colMeans(x=Hulls)
+IDY <- colMeans(x=IDY) 
+Geosorb <- colMeans(x=Geosorb)
+Control <- colMeans(x=Control)
+final <- rbind(Control,Hulls,IDY,Geosorb)
+maxmin <- rbind(rep(9,15), rep(3,15), final) #I had to calculate max min for the set to make this right.
+data <- as.data.frame(maxmin)
+write.csv(data,"E:\\WBM.csv")
+
+tiff('Radar WBM.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+
+
+create_beautiful_radarchart <- function(data, color = "#D73027", 
+                                        vlabels = colnames(data), vlcex = 0.7,
+                                        title = NULL, caxislabels=NULL, ...){
+# plot with default options:
+radarchart( data  , axistype=4, maxmin=TRUE,
+    #customize the polygon
+    pcol=color , pfcol= scales::alpha(color,0.3) , plwd=1 , plty=1,
+    #customize the grid
+    cglcol="grey", cglty=1, cglwd=0.8,
+    #Customize the axis
+    axislabcol = "grey",
+    #Variable Labels
+    vlcex= vlcex, vlabels=vlabels, caxislabels = NULL
+    )
+}
+# Reduce plot margin using par()
+op <- par(mar = c(3, 2, 2, 2))
+create_beautiful_radarchart(data, caxislabels=NULL , color=c("#eb0909","#4c2bba","#2b8235","#f7e919"))
+
+# Add a legend
+legend(
+ x = "bottom", inset=c(0,-.1), legend = c("Control", "Yeast Hulls","Inactivated Dry Yeasts","Geosorb"), horiz = TRUE,
+ bty = "n", pch = 20 , col = c("#eb0909","#4c2bba","#2b8235","#f7e919"),
+ text.col = "black", cex = 1, pt.cex = 1.5, xpd=TRUE, x.intersp = .5, text.width=c(0.78,0.8,6,1.2)
+ )
+par(op)
+dev.off()
+
+```
+
+```{r Parallel Coordinate Plots, eval=FALSE, include=FALSE}
+# Libraries
+#library(hrbrthemes)
+#library(patchwork)
+#library(GGally)
+#library(viridis)
+
+sub.fine <- rbind(sub.cs.control, sub.cf.control, sub.fine.cs, sub.fine.cf) #create new data frame along rows, remember geosorb is gone
+sub.fine.mat <-as.matrix(sub.fine[3:17])
+dineof.fine <- dineof(sub.fine.mat, delta.rms = 1e-02, method="svd") #DINEOF for the CF Fining Agents
+df <- cbind(sub.fine[,1:2], dineof.fine[["Xa"]]) #create new df, concatenating the column 
+names(df)[1]<-"varietal" #rename the column
+names(df)[2]<-"treatment"
+#str(df)
+
+#Split based on Treatment
+split.fining <- split(df, df$treatment)
+CaseiPlus <-split.fining$CaseiPlus100ghL[3:17]
+Polylact <- split.fining$Polylact100ghL[3:17]
+Skim <- split.fining$SkimMilk10mLL[3:17]
+Control <-split.fining$Control[3:17]
+
+# Compute average for each factor and add the two requisite boundaries to the plot
+CaseiPlus <- colMeans(x=CaseiPlus)
+Polylact <- colMeans(x=Polylact) 
+Skim <- colMeans(x=Skim)
+Control <- colMeans(x=Control)
+final <- rbind(Control,CaseiPlus,Polylact)
+df <- cbind(rownames(final), data.frame(final, row.names = NULL))
+names(df)[1]<-"treatment"
+df[,'treatment']<-as.factor(df[,'treatment'])
+df2 <- df[,c(1,2,7,3,8,4,9,5,10,6,11,12:16)]
+
+# Plot
+library("GGally")
+ggparcoord(df2, columns= 2:16,
+    showPoints = FALSE,
+    scale = "globalminmax",
+    splineFactor = TRUE,
+    groupColumn = "treatment",
+    title = "",
+    alphaLines = 1)
+
+```
+
+```{r Barplots, echo=FALSE}
+# Create Two Barcharts
+
+cs.trt <- c(rep("4-Methyl Guaiacol",3),rep("Guaiacol",3),  rep("Phenol",3))
+cf.trt <- c(rep("4-Methyl Guaiacol",4), rep("Guaiacol",4), rep("Phenol",4))
+
+cs.cond <- rep(c("Control","Skim Milk", "Geosorb"),3)
+cf.cond <- rep(c("Control","Casei Plus","Polylact","Geosorb"),3)
+
+cs.value <- c(2.5,2.3,2,5.7,5.1,3.1,25.5,16.6,9)
+cf.value <- c(3.8,2.6,2.8,3,6.7,7,5,7,14.4,8.4,9.2,10.6)
+
+#tiff('QuantFineCS.tiff', units="in", width = 7.25, height = 6.0, res=300)
+data.cs <- data.frame(cs.trt, cs.cond, cs.value)
+data.cs$cs.cond <- ordered(data.cs$cs.cond, levels= c("Control","Skim Milk","Geosorb"))
+cs.plot <- ggplot(data.cs, aes(x=cs.trt, fill=cs.cond, y=cs.value))+
+   geom_bar(position="dodge", stat="identity")+
+   labs(y="\u00b5g/L (ppb)", x= "Analyte (Total/Bound)", fill="Treatment")
+cs.plot + scale_fill_manual(values=c("#eb0909","#4c2bba","#2b8235"))+
+   theme(axis.title.x = element_text(margin = margin(t=5,b=5)))
+#dev.off()
+
+#tiff('QuantFineCF.tiff', units = "in", width = 7.25, height = 6.0, res=300)
+data.cf <-data.frame(cf.trt,cf.cond,cf.value)
+data.cf$cf.cond <- ordered(data.cf$cf.cond, levels=c("Control","Casei Plus","Polylact","Geosorb"))
+cf.plot <- ggplot(data.cf, aes(x=cf.trt, fill=cf.cond, y=cf.value))+
+   geom_bar(position = "dodge", stat="identity")+
+   labs(y="\u00b5g/L (ppb)", x= "Analyte (Total/Bound)", fill="Treatment")
+cf.plot + scale_fill_manual(values=c("#eb0909","#4c2bba","#2b8235","#f7e919"))+
+   theme(axis.title.x = element_text(margin = margin(t=5,b=5)))
+#dev.off()
+```
+
+# Conclusions
+
+This data set was acquired using a virtual wine tasting platform. It was designed to generate insight into product knowledge for a new problems related to winemaking and climate change. The data possesses gaps or NA values which were interpolated as a feature engineering and data cleaning process. Then, the distribution of the data was determined in our hypothesis test one. Hypothesis test two, generated significant findings from our PCA centroids and illustrated product usage and dosage insight into problems arising from winemaking in smoke impacted regions. We continue to look at this mainframe and ask if we can build predictive models using our quantitative analysis data to provide a consumer rejection threshold modeled after 15 target variables instead of one. This study is ongoing, but the data set is available upon request.
